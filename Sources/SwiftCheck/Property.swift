@@ -393,6 +393,14 @@ extension Testable {
 			return Prop(unProp: transform(t.unProp))
 		}
 	}
+    
+    public func testing() -> Property {
+        Property(property.unProperty, testType: .testing)
+    }
+    
+    public func xctest() -> Property {
+        Property(property.unProperty, testType: .xctest)
+    }
 }
 
 /// Using a shrinking function, shrinks a given argument to a property if it

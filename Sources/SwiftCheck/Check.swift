@@ -6,6 +6,10 @@
 //  Copyright (c) 2015 TypeLift. All rights reserved.
 //
 
+#if canImport(Testing)
+import Testing
+#endif
+
 /// The main interface for the SwiftCheck testing mechanism.  `property`
 /// notation is used to define a property that SwiftCheck can generate test
 /// cases for and a human-readable label for debugging output.  A simple
@@ -42,8 +46,8 @@
 ///     test case in which this function was called.
 ///   - line: The line number on which test occurred. Defaults to the line
 ///     number on which this function was called.
-public func property(_ message : String, arguments : CheckerArguments? = nil, file : StaticString = #file, line : UInt = #line) -> AssertiveQuickCheck {
-	return AssertiveQuickCheck(msg: message, file: file, line: line, args: arguments ?? CheckerArguments(name: message))
+public func property(_ message : String, arguments : CheckerArguments? = nil, file : StaticString = #file, line : UInt = #line, sourceLocation : SourceLocation = #_sourceLocation) -> AssertiveQuickCheck {
+    return AssertiveQuickCheck(msg: message, file: file, line: line, sourceLocation: sourceLocation, args: arguments ?? CheckerArguments(name: message))
 }
 
 /// Describes a checker that uses XCTest to assert all testing failures and
@@ -52,12 +56,14 @@ public struct AssertiveQuickCheck {
 	fileprivate let msg : String
 	fileprivate let file : StaticString
 	fileprivate let line : UInt
-	fileprivate let args : CheckerArguments
+    fileprivate let sourceLocation: SourceLocation
+    fileprivate let args : CheckerArguments
 
-	fileprivate init(msg : String, file : StaticString, line : UInt, args : CheckerArguments) {
+    fileprivate init(msg : String, file : StaticString, line : UInt, sourceLocation: SourceLocation, args : CheckerArguments) {
 		self.msg = msg
 		self.file = file
 		self.line = line
+        self.sourceLocation = sourceLocation
 		self.args = { var chk = args; chk.name = msg; return chk }()
 	}
 }
@@ -72,8 +78,8 @@ public struct AssertiveQuickCheck {
 ///     test case in which this function was called.
 ///   - line: The line number on which test occurred. Defaults to the line
 ///     number on which this function was called.
-public func reportProperty(_ message : String, arguments : CheckerArguments? = nil, file : StaticString = #file, line : UInt = #line) -> ReportiveQuickCheck {
-	return ReportiveQuickCheck(msg: message, file: file, line: line, args: arguments ?? CheckerArguments(name: message))
+public func reportProperty(_ message : String, arguments : CheckerArguments? = nil, file : StaticString = #file, line : UInt = #line, sourceLocation: SourceLocation = #_sourceLocation) -> ReportiveQuickCheck {
+    return ReportiveQuickCheck(msg: message, file: file, line: line, sourceLocation: sourceLocation, args: arguments ?? CheckerArguments(name: message))
 }
 
 /// Describes a checker that only reports failures to the testing log but does
@@ -82,12 +88,14 @@ public struct ReportiveQuickCheck {
 	fileprivate let msg : String
 	fileprivate let file : StaticString
 	fileprivate let line : UInt
+    fileprivate let sourceLocation: SourceLocation
 	fileprivate let args : CheckerArguments
 
-	fileprivate init(msg : String, file : StaticString, line : UInt, args : CheckerArguments) {
+	fileprivate init(msg : String, file : StaticString, line : UInt, sourceLocation: SourceLocation, args : CheckerArguments) {
 		self.msg = msg
 		self.file = file
 		self.line = line
+        self.sourceLocation = sourceLocation
 		self.args = { var chk = args; chk.name = msg; return chk }()
 	}
 }
@@ -160,28 +168,12 @@ infix operator <-
 
 /// Binds a Testable value to a property.
 public func <- (checker : AssertiveQuickCheck, test : @autoclosure @escaping () -> Testable) {
-	switch quickCheckWithResult(checker.args, test()) {
-	case let .failure(_, _, seed, sz, reason, _, _):
-		XCTFail(reason + "; Replay with \(seed) and size \(sz)", file: checker.file, line: checker.line)
-	case let .noExpectedFailure(_, seed, sz, _, _):
-		XCTFail("Expected property to fail but it didn't.  Replay with \(seed) and size \(sz)", file: checker.file, line: checker.line)
-	case let .insufficientCoverage(_, seed, sz, _, _):
-		XCTFail("Property coverage insufficient.  Replay with \(seed) and size \(sz)", file: checker.file, line: checker.line)
-	default: ()
-	}
+    performTest(checker: checker, test: test())
 }
 
 /// Binds a Testable value to a property.
 public func <- (checker : AssertiveQuickCheck, test : () -> Testable) {
-	switch quickCheckWithResult(checker.args, test()) {
-	case let .failure(_, _, seed, sz, reason, _, _):
-		XCTFail(reason + "; Replay with \(seed) and size \(sz)", file: checker.file, line: checker.line)
-	case let .noExpectedFailure(_, seed, sz, _, _):
-		XCTFail("Expected property to fail but it didn't.  Replay with \(seed) and size \(sz)", file: checker.file, line: checker.line)
-	case let .insufficientCoverage(_, seed, sz, _, _):
-		XCTFail("Property coverage insufficient.  Replay with \(seed) and size \(sz)", file: checker.file, line: checker.line)
-	default: ()
-	}
+    performTest(checker: checker, test: test())
 }
 
 /// Binds a Testable value to a property.
@@ -192,6 +184,31 @@ public func <- (checker : ReportiveQuickCheck, test : () -> Testable) {
 /// Binds a Testable value to a property.
 public func <- (checker : ReportiveQuickCheck, test : @autoclosure @escaping () -> Testable) {
 	_ = quickCheckWithResult(checker.args, test())
+}
+
+private func performTest(checker: AssertiveQuickCheck, test: Testable) {
+    func fail(_ comment: Comment) {
+        #if canImport(Testing)
+        switch test.property.testType {
+        case .testing:
+            #expect(Bool(false), comment, sourceLocation: checker.sourceLocation)
+        case .xctest:
+            XCTFail(comment.rawValue, file: checker.file, line: checker.line)
+        }
+        #else
+        XCTFail(comment.rawValue, file: checker.file, line: checker.line)
+        #endif
+    }
+    
+    switch quickCheckWithResult(checker.args, test) {
+    case let .failure(_, _, seed, sz, reason, _, _):
+        fail("\(reason); Replay with \(seed) and size \(sz)")
+    case let .noExpectedFailure(_, seed, sz, _, _):
+        fail("Expected property to fail but it didn't.  Replay with \(seed) and size \(sz)")
+    case let .insufficientCoverage(_, seed, sz, _, _):
+        fail("Property coverage insufficient.  Replay with \(seed) and size \(sz)")
+    default: ()
+    }
 }
 
 /// The interface for properties to be run through SwiftCheck with an XCTest

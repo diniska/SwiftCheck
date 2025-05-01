@@ -20,13 +20,24 @@ public protocol Testable {
 	var property : Property { get }
 }
 
+enum TestType {
+    case xctest
+    case testing
+}
+
 /// A property is anything that generates `Prop`s.
 public struct Property : Testable {
 	let unProperty : Gen<Prop>
+    let testType: TestType
 
 	public init(_ val : Gen<Prop>) {
-		self.unProperty = val
+        self.init(val, testType: .xctest)
 	}
+    
+    init (_ val: Gen<Prop>, testType: TestType) {
+        unProperty = val
+        self.testType = testType
+    }
 
 	/// Yields self.
 	public var property : Property {
